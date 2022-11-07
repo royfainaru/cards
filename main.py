@@ -130,11 +130,18 @@ class Table:
     def __len__(self):
         return len(self.players)
 
-    def add_player(self, name):
-        player = Player(name)
+    def add_player(self, name, cash=1000):
+        player = Player(name, cash)
         player.table = self
         self.players.append(player)
         self.bets[player] = 0
+        return player
+
+    def find_player(self, name):
+        for p in self.players:
+            if p.name == name:
+                return p
+        raise LookupError
 
     def remove_player(self, name):
         for i, p in enumerate(self.players):
@@ -142,11 +149,15 @@ class Table:
                 self.players.pop(i)
                 self.bets.pop(p)
                 p.table = None
-                return
+                return p
         raise LookupError
 
     def shuffle_deck(self):
         self.pile.shuffle()
+
+    @staticmethod
+    def move_card(source, i, target):
+        target.add_card(source.pop_card(i))
 
     def move_hand_to_scrap(self, player):
         hand = player.hand
@@ -179,6 +190,7 @@ class BlackJack:
     def __init__(self, run=True):
         self.table = Table(self.NUM_OF_DECKS)
         self.dealer = Player('dealer')
+        self.ghost_players = []
         if run:
             self.main()
 
@@ -199,12 +211,15 @@ class BlackJack:
             self.table.add_player(name)
             print(f'{name} has successfully entered the game')
 
-    def collect_bet(self, player):
-        bets = self.table.bets
-        bet = int(input('place bet: '))
-        player.cash -= bet
+    def collect_bet(self, player, bet, paying_player=None):
+        payer = paying_player if paying_player else player
+        payer.cash -= bet
         self.dealer.cash -= bet
-        bets[player] = 2 * bet
+        self.table.bets[player] += 2 * bet
+
+    def ask_for_bet(self, player):
+        bet = int(input('place bet: '))
+        self.collect_bet(player, bet)
 
     def collect_bets(self):
         collect = False
@@ -213,7 +228,7 @@ class BlackJack:
                 collect = True
                 continue
             print(f"{p.name}'s turn.\nBalance: {p.cash}")
-            self.collect_bet(p)
+            self.ask_for_bet(p)
 
     def loop_all_players(self):
         for p in self.table.players:
@@ -255,6 +270,17 @@ class BlackJack:
         self.table.bets[player] = 0
         print(f'now {player.name} has ${player.cash}.')
 
+    def _wrap_ghost(self, ghost):
+        p_name = ghost.name[:-1]
+        p = self.table.find_player(p_name)
+        p.cash += ghost.cash
+        self.table.remove_player(ghost.name)
+        self.ghost_players.remove(ghost)
+
+    def _wrap_all_ghosts(self):
+        for g in self.ghost_players:
+            self._wrap_ghost(g)
+
     def eval_and_pay_all(self):
         d_ev = self.eval_hard(self.dealer)
         print(f'dealer has {d_ev}.')
@@ -262,6 +288,7 @@ class BlackJack:
             if p == self.dealer:
                 continue
             self.eval_and_pay(d_ev, p)
+        self._wrap_all_ghosts()
 
     def clean_table(self):
         t = self.table
@@ -305,7 +332,7 @@ class BlackJack:
         ev = BlackJack.eval_soft(player)
         if ev > 21:
             return 0
-        if player.hand.find_value(1) and ev <= 11:
+        if ev <= 11 and player.hand.find_value(1):
             ev += 10
         if ev == 21 and len(player.hand) == 2:
             ev = 99
@@ -321,9 +348,36 @@ class BlackJack:
                 print('player busted')
                 break
             print(f'{p.hand} {hard_ev}{f"/{soft_ev}" if hard_ev - soft_ev else ""}')
-            if input('H/S? ') == 'S':
+            ###
+            st = 'H/S'
+            if len(p.hand) == 2:
+                st += '/D'
+                if p.hand[0].value == p.hand[1].value:
+                    st += '/s'
+            st += '? '
+            action = input(st)
+            if action == 'S':
                 break
-            self.table.deal_card_to_player(p)
+            elif action == 'H':
+                self.table.deal_card_to_player(p)
+            elif action == 'D':
+                self.collect_bet(p, self.table.bets[p] / 2)
+                self.table.deal_card_to_player(p)
+                break
+            elif action == 's':
+                tmp_p = self.table.add_player(p.name + '2', cash=0)
+                self.ghost_players.append(tmp_p)
+                self.collect_bet(tmp_p, self.table.bets[p] / 2, paying_player=p)
+                self.table.move_card(p.hand, 1, tmp_p.hand)
+                self.table.deal_card_to_player(p)
+                self.player_loop(p)
+                self.table.deal_card_to_player(tmp_p)
+                break
+
+            ###
+            # if input('H/S? ') == 'S':
+            #     break
+            # self.table.deal_card_to_player(p)
 
     def dealer_loop(self):
         d = self.dealer
@@ -340,3 +394,6 @@ class BlackJack:
                 continue
             print('dealer stays')
             break
+
+
+bj = BlackJack()
