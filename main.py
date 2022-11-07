@@ -73,19 +73,19 @@ class Hand:
         for c in self:
             if c.identify(value, suit):
                 return c
-        raise LookupError
+        return None
 
     def find_value(self, value):
         for c in self:
             if c.value == value:
-                return True
-        return False
+                return c
+        return None
 
     def find_suit(self, suit):
         for c in self:
             if c.suit == suit:
-                return True
-        return False
+                return c
+        return None
 
     def get_card(self, i):
         return self.cards[i]
@@ -144,44 +144,20 @@ class Table:
     def shuffle_deck(self):
         self.pile.shuffle()
 
+    def move_hand_to_scrap(self, player):
+        hand = player.hand
+        for _ in range(len(hand)):
+            card = hand.pop_card(0)
+            self.scrap.add_card(card)
+
     def move_scrap_to_deck(self):
-        for i in range(len(self.scrap)):
-            c = self.scrap.pop_card(i)
-            self.pile.add_card(c)
+        for _ in range(len(self.scrap)):
+            card = self.scrap.pop_card(0)
+            self.pile.add_card(card)
 
     def draw_card(self, player):
         c = self.pile.pop_card(0)
         player.hand.add_card(c)
-
-    def _hand_scrap_card(self, hand, card=None):
-        if card:
-            for i, c in enumerate(hand):
-                if c == card:
-                    card = hand.pop_card(i)
-                    break
-        #    raise LookupError
-        else:
-            card = hand.pop_card(0)
-        self.scrap.add_card(card)
-
-    def _find_and_scrap(self, hand, value, suit):
-        try:
-            i = hand.find_card(value, suit)
-            card = hand.pop_card(i)
-            self.scrap.add_card(card)
-        except LookupError:
-            raise LookupError
-
-    def deck_scrap_card(self):
-        self._hand_scrap_card(self.pile)
-
-    def player_scrap_card(self, player, card):
-        for i, _ in enumerate(player.hand):
-            c = player.hand[i]
-            if c == card:
-                player.hand.pop_card(i)
-                self.scrap.add_card(card)
-        raise LookupError
 
     def deal_card_to_player(self, p):
         c = self.pile.pop_card(0)
@@ -197,14 +173,15 @@ class Table:
 
 
 class BlackJack:
-    def __init__(self):
+    def __init__(self, run=True):
         self.table = Table()
-        self.table.add_player('dealer')
-        self.collect_player_names()
-        while True:
+        self.dealer = Player('dealer')
+        if run:
+            self.collect_player_names()
+        while run:
+            self.game()
             if input('Quit? ') == 'y':
                 break
-            self.game()
 
     def collect_player_names(self):
         while True:
@@ -212,76 +189,111 @@ class BlackJack:
                 break
             name = input('player name: ')
             self.table.add_player(name)
+            print(f'{name} has successfully entered the game')
 
     def collect_bets(self):
         bets = dict()
         for p in self.table.players:
-            if p.name == 'dealer':
-                continue
-            bet = int(input(f"{p.name}'s bet: "))
+            bet = int(input(f"{p.name}'s turn.\nBalance: {p.cash}\n Bet: "))
             p.cash -= bet
+            print(f'{p.name} now has ${p.cash}')
             bets[p] = 2 * bet
         return bets
 
     def game(self):
+        print('Collecting bets...')
         bets = self.collect_bets()
+        print('Dealing cards to all players...')
         self.table.deal_cards_to_all(2)
+        for _ in range(2):
+            self.table.deal_card_to_player(self.dealer)
+        print('Now playing.')
+        print(f'dealer showing {self.dealer.hand[0]}')
         for p in self.table.players:
             print(f'Current player: {p}')
             self.player_loop(p)
-        dealer_sum = 0
+        self.dealer_loop()
+        dealer_sum = self.eval_player(self.dealer)
+        print(f'dealer has {dealer_sum}.')
         for p in self.table.players:
-            if p.name == 'dealer':
-                dealer_sum = self.eval_player(p)
-                print(f'dealer has {dealer_sum}')
-                continue
             player_sum = self.eval_player(p)
             print(f'{p.name} has {player_sum}')
             winner = p if player_sum > dealer_sum else (self.table if player_sum < dealer_sum else None)
-            if winner:
+            if not winner:
+                print('push')
+            else:
                 winner.cash += bets[p]
+                if winner == p:
+                    print(f'{p.name} wins!')
+                else:
+                    print('dealer wins')
             bets[p] = 0
-            for c in p.hand:
-                self.table.player_scrap_card(p, c)
+            print(f'now {p.name} has ${p.cash}.')
+        for p in self.table.players:
+            print(f"now moving {p.name}'s cards to scrap")
+            self.table.move_hand_to_scrap(p)
+            print(f'now scrap has {len(self.table.scrap)} cards.')
+        print('now moving dealer cards to scrap')
+        self.table.move_hand_to_scrap(self.dealer)
+        print(f'now scrap has {len(self.table.scrap)} cards.')
+        print(f'deck has {len(self.table.pile)}. now moving scrap to deck')
         self.table.move_scrap_to_deck()
+        print(f'now deck has {len(self.table.pile)} cards and scrap has {len(self.table.scrap)} cards')
+        print('shuffling...')
         self.table.shuffle_deck()
+        print('done with current round!')
 
     @staticmethod
     def eval_hand(player):
         h = player.hand
-        sum = 0
+        res = 0
         for card in h:
             val = card.value
-            sum += 10 * (val >= 10) + val * (val < 10)
-        return sum
+            res += 10 * (val >= 10) + val * (val < 10)
+        return res
 
-    def eval_player(self, player):
-        ev = self.eval_hand(player)
+    @staticmethod
+    def eval_player(player):
+        ev = BlackJack.eval_hand(player)
         if ev > 21:
             return False
         if player.hand.find_value(1) and ev <= 11:
             return ev + 10
+        if ev == 21 and len(player.hand) == 2:
+            ev += 1
         return ev
 
     def player_loop(self, player):
-        if player.name == 'dealer':
-            return self.dealer_loop(player)
         while True:
-            print(player)
+            hard_ev = self.eval_player(player)
+            soft_ev = self.eval_hand(player)
+            print(f'{player.hand} {hard_ev}{f"/{soft_ev}" if hard_ev - soft_ev else ""}')
             if input('H/S? ') == 'S':
                 break
             self.table.deal_card_to_player(player)
             if self.eval_hand(player) > 21:
                 break
 
-    def dealer_loop(self, dealer):
+    def dealer_loop(self):
+        dealer = self.dealer
         while True:
-            if self.eval_player(dealer) < 17:
+            ev = self.eval_player(dealer)
+            soft = self.eval_hand(dealer)
+            print(f'dealer hand: {dealer.hand} {ev}{f"/{soft}" if ev - soft else ""}')
+            if not ev:
+                print('dealer bust')
+                break
+            if ev < 17:
+                print('dealer hits')
                 self.table.deal_card_to_player(dealer)
                 continue
-            if self.eval_player(dealer) == 17 and self.eval_hand(dealer) == 7:
+            if ev == 17 and soft == 7:
+                print('dealer hits on soft 17')
                 self.table.deal_card_to_player(dealer)
                 continue
+            print('dealer stays')
             break
 
+
 bj = BlackJack()
+
