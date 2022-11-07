@@ -33,6 +33,9 @@ class Card:
             return False
         return self.index <= other.index
 
+    def identify(self, value, suit):
+        return self.value == value and self.suit == suit
+
     def color(self):
         return self.suit % 2 == 0
 
@@ -63,6 +66,27 @@ class Hand:
     def __repr__(self):
         return self.cards.__repr__()
 
+    def __getitem__(self, item):
+        return self.cards[item]
+
+    def find_card(self, value, suit):
+        for c in self:
+            if c.identify(value, suit):
+                return c
+        raise LookupError
+
+    def find_value(self, value):
+        for c in self:
+            if c.value == value:
+                return True
+        return False
+
+    def find_suit(self, suit):
+        for c in self:
+            if c.suit == suit:
+                return True
+        return False
+
     def get_card(self, i):
         return self.cards[i]
 
@@ -80,29 +104,38 @@ class Hand:
 
 
 class Player:
-    def __init__(self, name='John'):
+    def __init__(self, name='John', cash=1000):
         self.name = name
         self.hand = Hand()
         self.table = None
+        self.cash = cash
 
     def __len__(self):
         return len(self.hand)
+
+    def __repr__(self):
+        return f'{self.name}, {self.cash} {f", {self.hand}" if self.hand else ""}'
 
 
 class Table:
     def __init__(self):
         self.pile = Hand().deck()
         self.scrap = Hand()
+        self.cash = 0
         self.players = []
         self.shuffle_deck()
 
-    def add_player(self, player):
-        self.players.append(player)
-        player.table = self
+    def __len__(self):
+        return len(self.players)
 
-    def remove_player(self, player):
+    def add_player(self, name):
+        player = Player(name)
+        player.table = self
+        self.players.append(player)
+
+    def remove_player(self, name):
         for i, p in enumerate(self.players):
-            if p == player:
+            if p.name == name:
                 self.players.pop(i)
                 p.table = None
                 return
@@ -131,11 +164,19 @@ class Table:
             card = hand.pop_card(0)
         self.scrap.add_card(card)
 
+    def _find_and_scrap(self, hand, value, suit):
+        try:
+            i = hand.find_card(value, suit)
+            card = hand.pop_card(i)
+            self.scrap.add_card(card)
+        except LookupError:
+            raise LookupError
+
     def deck_scrap_card(self):
         self._hand_scrap_card(self.pile)
 
     def player_scrap_card(self, player, card):
-        for i in range(player.hand):
+        for i, _ in enumerate(player.hand):
             c = player.hand[i]
             if c == card:
                 player.hand.pop_card(i)
@@ -147,6 +188,100 @@ class Table:
         p.hand.add_card(c)
 
     def deal_cards_to_all(self, n):
-        for _ in n:
+        for _ in range(n):
             for p in self.players:
                 self.deal_card_to_player(p)
+
+    def __repr__(self):
+        return f'{len(self)} players. {len(self.pile)} cards in deck, {len(self.scrap)} cards in scrap'
+
+
+class BlackJack:
+    def __init__(self):
+        self.table = Table()
+        self.table.add_player('dealer')
+        self.collect_player_names()
+        while True:
+            if input('Quit? ') == 'y':
+                break
+            self.game()
+
+    def collect_player_names(self):
+        while True:
+            if input('add player? ') != 'y':
+                break
+            name = input('player name: ')
+            self.table.add_player(name)
+
+    def collect_bets(self):
+        bets = dict()
+        for p in self.table.players:
+            if p.name == 'dealer':
+                continue
+            bet = int(input(f"{p.name}'s bet: "))
+            p.cash -= bet
+            bets[p] = 2 * bet
+        return bets
+
+    def game(self):
+        bets = self.collect_bets()
+        self.table.deal_cards_to_all(2)
+        for p in self.table.players:
+            print(f'Current player: {p}')
+            self.player_loop(p)
+        dealer_sum = 0
+        for p in self.table.players:
+            if p.name == 'dealer':
+                dealer_sum = self.eval_player(p)
+                print(f'dealer has {dealer_sum}')
+                continue
+            player_sum = self.eval_player(p)
+            print(f'{p.name} has {player_sum}')
+            winner = p if player_sum > dealer_sum else (self.table if player_sum < dealer_sum else None)
+            if winner:
+                winner.cash += bets[p]
+            bets[p] = 0
+            for c in p.hand:
+                self.table.player_scrap_card(p, c)
+        self.table.move_scrap_to_deck()
+        self.table.shuffle_deck()
+
+    @staticmethod
+    def eval_hand(player):
+        h = player.hand
+        sum = 0
+        for card in h:
+            val = card.value
+            sum += 10 * (val >= 10) + val * (val < 10)
+        return sum
+
+    def eval_player(self, player):
+        ev = self.eval_hand(player)
+        if ev > 21:
+            return False
+        if player.hand.find_value(1) and ev <= 11:
+            return ev + 10
+        return ev
+
+    def player_loop(self, player):
+        if player.name == 'dealer':
+            return self.dealer_loop(player)
+        while True:
+            print(player)
+            if input('H/S? ') == 'S':
+                break
+            self.table.deal_card_to_player(player)
+            if self.eval_hand(player) > 21:
+                break
+
+    def dealer_loop(self, dealer):
+        while True:
+            if self.eval_player(dealer) < 17:
+                self.table.deal_card_to_player(dealer)
+                continue
+            if self.eval_player(dealer) == 17 and self.eval_hand(dealer) == 7:
+                self.table.deal_card_to_player(dealer)
+                continue
+            break
+
+bj = BlackJack()
