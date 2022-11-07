@@ -195,6 +195,7 @@ class BlackJack:
         for p in self.table.players:
             bet = int(input(f"{p.name}'s turn.\nBalance: {p.cash}\n Bet: "))
             p.cash -= bet
+            self.table.cash -= bet
             print(f'{p.name} now has ${p.cash}')
             bets[p] = 2 * bet
         return bets
@@ -259,7 +260,7 @@ class BlackJack:
         if player.hand.find_value(1) and ev <= 11:
             ev += 10
         if ev == 21 and len(player.hand) == 2:
-            ev += 1
+            ev = 99
         return ev
 
     def player_loop(self, player):
