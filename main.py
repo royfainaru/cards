@@ -255,9 +255,9 @@ class BlackJack:
     def eval_player(player):
         ev = BlackJack.eval_hand(player)
         if ev > 21:
-            return False
+            return 0
         if player.hand.find_value(1) and ev <= 11:
-            return ev + 10
+            ev += 10
         if ev == 21 and len(player.hand) == 2:
             ev += 1
         return ev
