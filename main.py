@@ -5,7 +5,7 @@ class Card:
     def __init__(self, value, suit):
         self.value = value
         self.suit = suit
-        self.index = 10*value + suit
+        self.index = 10 * value + suit
 
     def __eq__(self, other):
         return self.index == other.index
@@ -155,10 +155,6 @@ class Table:
             card = self.scrap.pop_card(0)
             self.pile.add_card(card)
 
-    def draw_card(self, player):
-        c = self.pile.pop_card(0)
-        player.hand.add_card(c)
-
     def deal_card_to_player(self, p):
         c = self.pile.pop_card(0)
         p.hand.add_card(c)
@@ -177,8 +173,11 @@ class BlackJack:
         self.table = Table()
         self.dealer = Player('dealer')
         if run:
-            self.collect_player_names()
-        while run:
+            self.main()
+
+    def main(self):
+        self.collect_player_names()
+        while True:
             self.game()
             if input('Quit? ') == 'y':
                 break
@@ -293,7 +292,3 @@ class BlackJack:
                 continue
             print('dealer stays')
             break
-
-
-bj = BlackJack()
-
