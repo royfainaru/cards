@@ -47,11 +47,12 @@ class Card:
 
 class Hand:
     @classmethod
-    def deck(cls):
+    def deck(cls, n=1):
         obj = cls()
-        for i in range(1, 14):
-            for j in range(1, 5):
-                obj.add_card(Card(i, j))
+        for _ in range(n):
+            for i in range(1, 14):
+                for j in range(1, 5):
+                    obj.add_card(Card(i, j))
         return obj
 
     def __init__(self):
@@ -118,11 +119,12 @@ class Player:
 
 
 class Table:
-    def __init__(self):
-        self.pile = Hand().deck()
+    def __init__(self, num_of_decks=1):
+        self.pile = Hand().deck(num_of_decks)
         self.scrap = Hand()
         self.cash = 0
         self.players = []
+        self.bets = dict()
         self.shuffle_deck()
 
     def __len__(self):
@@ -132,11 +134,13 @@ class Table:
         player = Player(name)
         player.table = self
         self.players.append(player)
+        self.bets[player] = 0
 
     def remove_player(self, name):
         for i, p in enumerate(self.players):
             if p.name == name:
                 self.players.pop(i)
+                self.bets.pop(p)
                 p.table = None
                 return
         raise LookupError
@@ -169,8 +173,11 @@ class Table:
 
 
 class BlackJack:
+    NUM_OF_DECKS = 6
+    SCRAP_LIMIT = 52
+
     def __init__(self, run=True):
-        self.table = Table()
+        self.table = Table(self.NUM_OF_DECKS)
         self.dealer = Player('dealer')
         if run:
             self.main()
@@ -179,10 +186,12 @@ class BlackJack:
         self.collect_player_names()
         while True:
             self.game()
-            if input('Quit? ') == 'y':
+            action = input('Quit? ')
+            if action == 'y':
                 break
 
     def collect_player_names(self):
+        self.table.players.append(self.dealer)
         while True:
             if input('add player? ') != 'y':
                 break
@@ -190,61 +199,100 @@ class BlackJack:
             self.table.add_player(name)
             print(f'{name} has successfully entered the game')
 
+    def collect_bet(self, player):
+        bets = self.table.bets
+        bet = int(input('place bet: '))
+        player.cash -= bet
+        self.dealer.cash -= bet
+        bets[player] = 2 * bet
+
     def collect_bets(self):
-        bets = dict()
+        collect = False
         for p in self.table.players:
-            bet = int(input(f"{p.name}'s turn.\nBalance: {p.cash}\n Bet: "))
-            p.cash -= bet
-            self.table.cash -= bet
-            print(f'{p.name} now has ${p.cash}')
-            bets[p] = 2 * bet
-        return bets
+            if not collect:
+                collect = True
+                continue
+            print(f"{p.name}'s turn.\nBalance: {p.cash}")
+            self.collect_bet(p)
+
+    def loop_all_players(self):
+        for p in self.table.players:
+            if p == self.dealer:
+                continue
+            self.player_loop(p)
+        self.dealer_loop()
+
+    @staticmethod
+    def calc_eval_pts(player_ev, other_ev):
+        return 0.5 * ((player_ev >= other_ev) + (player_ev > other_ev))
+
+    @staticmethod
+    def calc_profit(p_ev, o_ev, pot):
+        p_ev_pts = BlackJack.calc_eval_pts(p_ev, o_ev)
+        return pot * p_ev_pts
+
+    @staticmethod
+    def declare_winner(p_profit, d_profit):
+        if p_profit > d_profit:
+            print('player wins!')
+        elif p_profit < d_profit:
+            print('dealer wins')
+        else:
+            print('push')
+
+    def eval_and_pay(self, d_ev, player):
+        p_ev = self.eval_hard(player)
+        print(f'{player.name} has {p_ev}')
+        #
+        pot = self.table.bets[player]
+        p_profit = self.calc_profit(p_ev, d_ev, pot)
+        d_profit = pot - p_profit
+        #
+        self.declare_winner(p_profit, d_profit)
+        #
+        player.cash += p_profit
+        self.dealer.cash += d_profit
+        self.table.bets[player] = 0
+        print(f'now {player.name} has ${player.cash}.')
+
+    def eval_and_pay_all(self):
+        d_ev = self.eval_hard(self.dealer)
+        print(f'dealer has {d_ev}.')
+        for p in self.table.players:
+            if p == self.dealer:
+                continue
+            self.eval_and_pay(d_ev, p)
+
+    def clean_table(self):
+        t = self.table
+        for p in t.players:
+            t.move_hand_to_scrap(p)
+        if len(t.scrap) >= self.SCRAP_LIMIT:
+            t.move_scrap_to_deck()
+            print(f'shuffling cards...')
+            t.pile.shuffle()
 
     def game(self):
         print('Collecting bets...')
-        bets = self.collect_bets()
+        self.collect_bets()
+        #
         print('Dealing cards to all players...')
         self.table.deal_cards_to_all(2)
-        for _ in range(2):
-            self.table.deal_card_to_player(self.dealer)
-        print('Now playing.')
         print(f'dealer showing {self.dealer.hand[0]}')
-        for p in self.table.players:
-            print(f'Current player: {p}')
-            self.player_loop(p)
-        self.dealer_loop()
-        dealer_sum = self.eval_player(self.dealer)
-        print(f'dealer has {dealer_sum}.')
-        for p in self.table.players:
-            player_sum = self.eval_player(p)
-            print(f'{p.name} has {player_sum}')
-            winner = p if player_sum > dealer_sum else (self.table if player_sum < dealer_sum else None)
-            if not winner:
-                print('push')
-            else:
-                winner.cash += bets[p]
-                if winner == p:
-                    print(f'{p.name} wins!')
-                else:
-                    print('dealer wins')
-            bets[p] = 0
-            print(f'now {p.name} has ${p.cash}.')
-        for p in self.table.players:
-            print(f"now moving {p.name}'s cards to scrap")
-            self.table.move_hand_to_scrap(p)
-            print(f'now scrap has {len(self.table.scrap)} cards.')
-        print('now moving dealer cards to scrap')
-        self.table.move_hand_to_scrap(self.dealer)
-        print(f'now scrap has {len(self.table.scrap)} cards.')
-        print(f'deck has {len(self.table.pile)}. now moving scrap to deck')
-        self.table.move_scrap_to_deck()
-        print(f'now deck has {len(self.table.pile)} cards and scrap has {len(self.table.scrap)} cards')
-        print('shuffling...')
-        self.table.shuffle_deck()
-        print('done with current round!')
+        #
+        print('Now playing.')
+        self.loop_all_players()
+        #
+        print('Now evaluating results and paying winners.')
+        self.eval_and_pay_all()
+        #
+        print('Now cleaning table')
+        self.clean_table()
+        #
+        print('Done with current round!')
 
     @staticmethod
-    def eval_hand(player):
+    def eval_soft(player):
         h = player.hand
         res = 0
         for card in h:
@@ -253,8 +301,8 @@ class BlackJack:
         return res
 
     @staticmethod
-    def eval_player(player):
-        ev = BlackJack.eval_hand(player)
+    def eval_hard(player):
+        ev = BlackJack.eval_soft(player)
         if ev > 21:
             return 0
         if player.hand.find_value(1) and ev <= 11:
@@ -264,32 +312,31 @@ class BlackJack:
         return ev
 
     def player_loop(self, player):
+        p = player
+        print(f"{p.name}'s turn.")
         while True:
-            hard_ev = self.eval_player(player)
-            soft_ev = self.eval_hand(player)
-            print(f'{player.hand} {hard_ev}{f"/{soft_ev}" if hard_ev - soft_ev else ""}')
+            hard_ev = self.eval_hard(p)
+            soft_ev = self.eval_soft(p)
+            if not hard_ev:
+                print('player busted')
+                break
+            print(f'{p.hand} {hard_ev}{f"/{soft_ev}" if hard_ev - soft_ev else ""}')
             if input('H/S? ') == 'S':
                 break
-            self.table.deal_card_to_player(player)
-            if self.eval_hand(player) > 21:
-                break
+            self.table.deal_card_to_player(p)
 
     def dealer_loop(self):
-        dealer = self.dealer
+        d = self.dealer
         while True:
-            ev = self.eval_player(dealer)
-            soft = self.eval_hand(dealer)
-            print(f'dealer hand: {dealer.hand} {ev}{f"/{soft}" if ev - soft else ""}')
-            if not ev:
-                print('dealer bust')
+            ev_hard = self.eval_hard(d)
+            ev_soft = self.eval_soft(d)
+            print(f'dealer hand: {d.hand} {ev_hard}{f"/{ev_soft}" if ev_hard - ev_soft else ""}')
+            if not ev_hard:
+                print('dealer busted')
                 break
-            if ev < 17:
+            if ev_hard < 17 or ev_soft == 7:
                 print('dealer hits')
-                self.table.deal_card_to_player(dealer)
-                continue
-            if ev == 17 and soft == 7:
-                print('dealer hits on soft 17')
-                self.table.deal_card_to_player(dealer)
+                self.table.deal_card_to_player(d)
                 continue
             print('dealer stays')
             break
